@@ -11,6 +11,7 @@
         rel="stylesheet">
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -728,7 +729,9 @@
                     </h3>
                     <div class="flex gap-2 items-center">
                         <input type="text" id="vendorTableSearch" placeholder="Search any column…" class="text-sm" style="width:260px;" oninput="filterVendorTable(this.value)">
-                        <button class="btn-primary text-xs px-3 py-1" onclick="exportVendorTableCSV()">Export CSV</button>
+                        <button class="btn-primary text-xs px-3 py-1" onclick="exportVendorTableCSV()">Table CSV</button>
+                        <button class="btn-secondary text-xs px-3 py-1" onclick="exportGeocodedData('csv')" title="All geocoded vendor rows with lat/lng">Geo CSV</button>
+                        <button class="btn-secondary text-xs px-3 py-1" onclick="exportGeocodedData('xlsx')" title="All geocoded vendor rows with lat/lng">Geo XLSX</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -783,9 +786,16 @@
                         <button class="btn-primary text-sm w-full mb-3" onclick="downloadMapImage('png')">
                             Download Map (PNG)
                         </button>
-                        <button class="btn-secondary text-sm w-full" onclick="exportMapData()">
-                            Export Map Data (CSV)
+                        <button class="btn-secondary text-sm w-full mb-2" onclick="exportMapData()">
+                            ZIP aggregates + distances (CSV)
                         </button>
+                        <button class="btn-primary text-sm w-full mb-2" onclick="exportGeocodedData('csv')">
+                            Geocoded vendors (CSV)
+                        </button>
+                        <button class="btn-primary text-sm w-full" onclick="exportGeocodedData('xlsx')">
+                            Geocoded vendors (XLSX)
+                        </button>
+                        <p class="text-[11px] text-[var(--text-subtle)] mt-2 leading-snug">Vendor-level rows from the last successful run (selected state), original columns plus resolved coords (<strong>latitude</strong> / <strong>longitude</strong>, or <strong>geocoded_*</strong> if your file already uses those names).</p>
                     </div>
 
                     <div class="control-panel map-legend">
@@ -853,12 +863,18 @@
                 </h3>
                 <div class="rounded-xl overflow-hidden min-h-[550px] mb-8 border border-[var(--border-light)] bg-[var(--background-card)]"
                     id="binned-plot"></div>
-                <div class="flex gap-4">
+                <div class="flex flex-wrap gap-3">
                     <button class="btn-primary" onclick="downloadReport()">
                         📥 Download Full Report (CSV)
                     </button>
                     <button class="btn-secondary" onclick="exportMapData()">
-                        🗺️ Export Demand Points Data
+                        🗺️ ZIP aggregates + distances (CSV)
+                    </button>
+                    <button class="btn-secondary" onclick="exportGeocodedData('csv')">
+                        📍 Geocoded vendors (CSV)
+                    </button>
+                    <button class="btn-secondary" onclick="exportGeocodedData('xlsx')">
+                        📍 Geocoded vendors (XLSX)
                     </button>
                 </div>
             </div>
@@ -1088,7 +1104,9 @@
             /** Set on each CSV upload: original column order + which column drives COG weight */
             csvProfile: null,
             /** Mapbox Directions geometry cache: key → { lat, lon, miles } | null */
-            routeGeometryCache: {}
+            routeGeometryCache: {},
+            /** Last successful run: vendor-level rows in analysis scope with resolved lat/lng (ZIP lookup or file). */
+            geocodedRows: []
         };
 
         function getCsvVolumeLabel() {
@@ -1571,6 +1589,7 @@
             appState.parsedRows = rawData;
             appState.vendorTableData = rawData;
             appState.data = null;
+            appState.geocodedRows = [];
 
             const volSource   = volColUsed + (headerMap._inferredVolume ? ' (auto-detected)' : '');
             const coordSource = hasCoords ? 'lat/lng + ZIP lookup fallback after state selection' : 'ZIP lookup after state selection';
@@ -2984,6 +3003,8 @@
                         throw new Error("No rows in selected scope could be geocoded. Check ZIP/lat/lng fields.");
                     }
 
+                    appState.geocodedRows = geocodedRows;
+
                     appState.missingZips = missingZips;
                     if (missingZips.length > 0) {
                         const totalSkippedVol = missingZips.reduce((s, z) => s + (z.volume || 0), 0);
@@ -4359,6 +4380,85 @@
         // Renamed existing function to use the new wrapper
         function downloadMapImage(format) {
             downloadPlotlyImage('map-plot', 'geographic_map', format);
+        }
+
+        /**
+         * Flatten geocoded vendor rows for download: original CSV columns (from upload order) + latitude, longitude.
+         */
+        function buildGeocodedExportTable() {
+            const rows = appState.geocodedRows;
+            if (!rows || !rows.length) return { headers: [], lines: [] };
+            let srcFields = (appState.csvProfile && appState.csvProfile.sourceFields && appState.csvProfile.sourceFields.length)
+                ? [...appState.csvProfile.sourceFields]
+                : (rows[0] && rows[0]._source ? Object.keys(rows[0]._source) : []);
+            if (!srcFields.length) {
+                srcFields = ['ZIP_CODE', 'state', 'cluster', 'adv', 'TOTAL_WEIGHT', 'shipmentCount', 'sellerType', 'isCommercial', 'address'];
+            }
+            const lower = new Set(srcFields.map(f => String(f).trim().toLowerCase()));
+            let latName = 'latitude';
+            let lngName = 'longitude';
+            if (lower.has('latitude')) latName = 'geocoded_latitude';
+            if (lower.has('longitude')) lngName = 'geocoded_longitude';
+            if (lower.has(latName.toLowerCase())) latName = 'cog_temu_latitude';
+            if (lower.has(lngName.toLowerCase())) lngName = 'cog_temu_longitude';
+            const tail = [latName, lngName];
+            const headers = [...srcFields, ...tail];
+            const lines = rows.map(r => {
+                const cells = srcFields.map(f => {
+                    if (r._source && Object.prototype.hasOwnProperty.call(r._source, f)) return r._source[f];
+                    if (Object.prototype.hasOwnProperty.call(r, f) && f !== '_source') return r[f];
+                    return '';
+                });
+                const lat = r.lat != null && Number.isFinite(Number(r.lat)) ? Number(r.lat) : '';
+                const lng = r.lng != null && Number.isFinite(Number(r.lng)) ? Number(r.lng) : '';
+                cells.push(lat, lng);
+                return cells;
+            });
+            return { headers, lines };
+        }
+
+        function exportGeocodedData(format) {
+            const rows = appState.geocodedRows;
+            if (!rows || !rows.length) {
+                alert('No geocoded export yet. Select a state, run analysis successfully, then download.');
+                return;
+            }
+            const { headers, lines } = buildGeocodedExportTable();
+            if (!headers.length) {
+                alert('Could not determine columns for export.');
+                return;
+            }
+            const stamp = new Date().toISOString().slice(0, 10);
+            const escCell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+
+            if (format === 'csv') {
+                const csv = '\uFEFF' + [headers.map(escCell).join(','), ...lines.map(c => c.map(escCell).join(','))].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `temu_geocoded_vendors_${stamp}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                return;
+            }
+
+            if (format === 'xlsx') {
+                if (typeof XLSX === 'undefined') {
+                    alert('XLSX library not loaded. Use CSV export or check your network connection.');
+                    return;
+                }
+                const aoa = [headers, ...lines.map(c => c.slice())];
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Geocoded');
+                XLSX.writeFile(wb, `temu_geocoded_vendors_${stamp}.xlsx`);
+                return;
+            }
+
+            alert('Unknown export format.');
         }
 
         function exportMapData() {
