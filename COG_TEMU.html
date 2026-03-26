@@ -625,7 +625,7 @@
                     </h4>
                     <div class="mt-6 p-4 rounded-xl border-2 border-[var(--maersk-accent-blue)] bg-[var(--maersk-lighter-blue)]">
                         <label class="block text-sm font-semibold text-[var(--maersk-primary-blue)] mb-2">🗾 Analyze by state</label>
-                        <p class="text-xs text-[var(--text-subtle)] mb-3">Required: choose one state. The file stays in memory until you upload a different CSV. Semicolon- and comma-separated files are detected automatically.</p>
+                        <p class="text-xs text-[var(--text-subtle)] mb-3">Choose one state or <strong>All states</strong>. The file stays in memory until you upload a different CSV. Semicolon- and comma-separated files are detected automatically.</p>
                         <select id="stateFilterSingle" class="w-full text-base font-medium" onchange="onStateFilterChange()">
                             <option value="">— Upload a CSV first —</option>
                         </select>
@@ -2235,7 +2235,7 @@
         function getVendorRowsForCurrentScope() {
             const raw = appState.vendorTableData || [];
             const st = document.getElementById('stateFilterSingle')?.value || '';
-            if (!st) return raw;
+            if (!st || st === '__ALL__') return raw;
             return raw.filter(d => d.state === st);
         }
 
@@ -2253,15 +2253,20 @@
                 sel.innerHTML = '<option value="">— No state column found (check CSV headers) —</option>';
                 return;
             }
-            sel.innerHTML = '<option value="">— Select one state —</option>' +
-                states.map(s => {
-                    const cnt = rows.filter(d => d.state === s).length;
-                    const adv = rows.filter(d => d.state === s).reduce((a, d) => a + (d.adv || 0), 0);
-                    const valAttr = String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-                    return `<option value="${valAttr}">${escapeHtmlCell(s)} — ${cnt.toLocaleString()} vendors · ${Math.round(adv).toLocaleString()} ${escapeHtmlCell(getCsvVolumeLabel())}/d</option>`;
-                }).join('');
-            if (prev && states.includes(prev)) sel.value = prev;
-            else sel.value = '';
+
+            const totalCnt = rows.length;
+            const totalAdv = rows.reduce((a, d) => a + (d.adv || 0), 0);
+            const allStatesOpt = `<option value="__ALL__">All states — ${totalCnt.toLocaleString()} vendors · ${Math.round(totalAdv).toLocaleString()} ${escapeHtmlCell(getCsvVolumeLabel())}/d</option>`;
+            const stateOpts = states.map(s => {
+                const cnt = rows.filter(d => d.state === s).length;
+                const adv = rows.filter(d => d.state === s).reduce((a, d) => a + (d.adv || 0), 0);
+                const valAttr = String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+                return `<option value="${valAttr}">${escapeHtmlCell(s)} — ${cnt.toLocaleString()} vendors · ${Math.round(adv).toLocaleString()} ${escapeHtmlCell(getCsvVolumeLabel())}/d</option>`;
+            }).join('');
+
+            sel.innerHTML = '<option value="">— Select scope —</option>' + allStatesOpt + stateOpts;
+            if (prev === '__ALL__' || states.includes(prev)) sel.value = prev;
+            else sel.value = '__ALL__';
         }
 
         function onStateFilterChange() {
@@ -2271,7 +2276,8 @@
                 if (st) {
                     const rows = getVendorRowsForCurrentScope();
                     const adv = rows.reduce((s, d) => s + (d.adv || 0), 0);
-                    hint.textContent = `Preview scoped to ${st}: ${rows.length.toLocaleString()} vendors · ${getCsvVolumeLabel()} ${Math.round(adv).toLocaleString()}/day. Click “Generate Consolidation Analysis” to update map & KPIs.`;
+                    const scopeLabel = st === '__ALL__' ? 'all states' : st;
+                    hint.textContent = `Preview scoped to ${scopeLabel}: ${rows.length.toLocaleString()} vendors · ${getCsvVolumeLabel()} ${Math.round(adv).toLocaleString()}/day. Click “Generate Consolidation Analysis” to update map & KPIs.`;
                     hint.classList.remove('hidden');
                 } else {
                     hint.classList.add('hidden');
@@ -2284,7 +2290,12 @@
 
         function getActiveStates() {
             const v = document.getElementById('stateFilterSingle')?.value || '';
-            return v ? new Set([v]) : new Set();
+            if (!v) return new Set();
+            if (v === '__ALL__') {
+                const rows = appState.vendorTableData || [];
+                return new Set(rows.map(d => String(d.state || '').trim()).filter(Boolean));
+            }
+            return new Set([v]);
         }
 
         // ── Cluster Preview (uses current state dropdown selection) ─────────────
@@ -2964,7 +2975,7 @@
                     // ── Apply state filter first; geocode/calculate only on scoped rows ──
                     const activeStates = getActiveStates();
                     if (activeStates.size === 0) {
-                        throw new Error("Please select a state first, then run analysis.");
+                        throw new Error("Please select a state scope first, then run analysis.");
                     }
                     const scopedRows = activeStates.size > 0
                         ? appState.vendorTableData.filter(d => activeStates.has(d.state))
