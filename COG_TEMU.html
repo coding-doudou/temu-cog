@@ -71,7 +71,7 @@
             transition: background-color var(--transition-speed);
             display: flex;
             flex-direction: column;
-            width: 100vw;
+            width: 100%;
             height: auto;
             min-height: 100vh;
         }
@@ -561,7 +561,8 @@
         #vendorDetailTable tbody tr:hover {
             background-color: #EFF6FF !important;
         }
-        #stateFilterSingle {
+        #stateFilterSingle,
+        #sellerTypeFilter {
             padding: 0.65rem 1rem;
             border: 2px solid var(--maersk-primary-blue);
             border-radius: var(--border-radius-base);
@@ -623,12 +624,21 @@
                     <h4 class="text-lg font-medium mb-4 flex items-center gap-2 text-[var(--text-heading)]">
                         ⚙️ Analysis Parameters
                     </h4>
-                    <div class="mt-6 p-4 rounded-xl border-2 border-[var(--maersk-accent-blue)] bg-[var(--maersk-lighter-blue)]">
-                        <label class="block text-sm font-semibold text-[var(--maersk-primary-blue)] mb-2">🗾 Analyze by state</label>
-                        <p class="text-xs text-[var(--text-subtle)] mb-3">Choose one state or <strong>All states</strong>. The file stays in memory until you upload a different CSV. Semicolon- and comma-separated files are detected automatically.</p>
-                        <select id="stateFilterSingle" class="w-full text-base font-medium" onchange="onStateFilterChange()">
-                            <option value="">— Upload a CSV first —</option>
-                        </select>
+                    <div class="mt-6 p-4 rounded-xl border-2 border-[var(--maersk-accent-blue)] bg-[var(--maersk-lighter-blue)] space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-[var(--maersk-primary-blue)] mb-2">🗾 Analyze by state</label>
+                            <p class="text-xs text-[var(--text-subtle)] mb-3">Choose one state or <strong>All states</strong>. The file stays in memory until you upload a different CSV. Semicolon- and comma-separated files are detected automatically.</p>
+                            <select id="stateFilterSingle" class="w-full text-base font-medium" onchange="onStateFilterChange()">
+                                <option value="">— Upload a CSV first —</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-[var(--maersk-primary-blue)] mb-2">🏷️ Filter by seller type (optional)</label>
+                            <p class="text-xs text-[var(--text-subtle)] mb-3">Narrow the view to Large / Medium / Small / Micro (or other seller types present in the file). Applies to previews, map, KPIs, and tables.</p>
+                            <select id="sellerTypeFilter" class="w-full text-base font-medium" onchange="onSellerTypeFilterChange()">
+                                <option value="">All seller types</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="mt-6">
                         <label class="block text-sm font-medium text-[var(--text-subtle)] mb-2">COG Method:</label>
@@ -653,7 +663,19 @@
                         <p class="text-xs text-[var(--text-subtle)] mt-1"><strong>Network hub COGs</strong> are extra weighted centers that partition <em>all</em> demand in scope into K regions (multi-facility placement, LogHub-style)—like several “network-scale” anchors alongside the single Network COG. <strong>Per-cluster COGs</strong> (one per CSV cluster) are always computed. On the map, use the toggles to show or hide hub vs cluster COG layers. Re-run analysis after changing K.</p>
                     </div>
                     <div id="stateFilterBanner" class="mt-4 hidden text-sm font-medium text-[var(--maersk-primary-blue)] p-3 rounded-lg bg-white border border-[var(--border-light)]"></div>
-                    <div id="facilitiesContainer" class="hidden"></div>
+
+                    <div class="mt-6">
+                        <div class="flex justify-between items-center mb-3">
+                            <h4 class="text-lg font-medium flex items-center gap-2 text-[var(--text-heading)]">
+                                🏢 Manual Facilities (optional)
+                            </h4>
+                            <button class="btn-primary text-sm px-4 py-2" onclick="addFacility()">+ Add Facility</button>
+                        </div>
+                        <p class="text-xs text-[var(--text-subtle)] mb-2">
+                            Use this to drop in <strong>actual or proposed sites</strong> from external tools and visually compare them with the Network / hub / cluster COGs our model generates. These sites are map-only and do not change the consolidation math.
+                        </p>
+                        <div id="facilitiesContainer" class="max-h-64 overflow-y-auto space-y-3"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -842,6 +864,23 @@
                         </h3>
                         <div class="overflow-x-auto">
                             <table id="serviceLevelSummaryTable" class="w-full min-w-max"></table>
+                        </div>
+
+                        <h3 class="text-xl font-medium mt-10 mb-3 flex items-center gap-2 text-[var(--text-heading)]">
+                            🚚 Distance bands for manual facility
+                            <div class="download-btn-group">
+                                <button class="btn-primary text-xs px-2 py-1"
+                                    onclick="downloadManualFacilityBandsCSV()">
+                                    Export Manual Facility Bands (CSV)
+                                </button>
+                            </div>
+                        </h3>
+                        <p class="text-xs text-[var(--text-subtle)] mb-3">
+                            Summary of vendor volume by distance from the default manual facility
+                            (<strong>2398 E Philadelphia St (Ontario, CA)</strong>) using the current state and seller-type filters.
+                        </p>
+                        <div class="overflow-x-auto mb-4">
+                            <table id="manualFacilityBandsTable" class="w-full min-w-max"></table>
                         </div>
 
                     </div>
@@ -1093,6 +1132,8 @@
             networkHubCOGs: [],
             // NEW: Track which facilities and circles are visible
             visibleFacilities: {},
+            visibleCircles: {},
+            visibleDistanceLabels: {},
             resizeTimeout: null,
             missingZips: [],  // ZIPs excluded from calculation
             selectedStates: new Set(), // State filter — empty = all states
@@ -1101,6 +1142,7 @@
             vendorTablePage: 1,
             parsedRows: [],       // Uploaded rows before geocoding/aggregation
             baseUploadStatus: '',
+            manualFacilityBands: null,
             /** Set on each CSV upload: original column order + which column drives COG weight */
             csvProfile: null,
             /** Mapbox Directions geometry cache: key → { lat, lon, miles } | null */
@@ -1611,6 +1653,9 @@
             populateStateFilter();
             const sfs = document.getElementById('stateFilterSingle');
             if (sfs) sfs.value = '';
+            const stf = document.getElementById('sellerTypeFilter');
+            if (stf) stf.value = '';
+            populateSellerTypeFilter();
             onStateFilterChange();
             updateUIState();
         }
@@ -1768,6 +1813,9 @@
             appState.facilities = [];
             appState.facilityIdCounter = 1;
             updateUIState();
+
+            // Default manual facility for quick comparison
+            addFacility('2398 E Philadelphia St (Ontario, CA)', 34.0316, -117.6187);
         }
 
 
@@ -1999,9 +2047,15 @@
                 const states = (r.states || []).slice(0, 5).join(', ') + (r.states && r.states.length > 5 ? ' +' + (r.states.length - 5) : '');
                 const stypes = r.sellerTypes ? Object.entries(r.sellerTypes).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k}:${v}`).join(' · ') : '—';
                 const dNet = r.distToNetworkCOG_mi != null ? r.distToNetworkCOG_mi.toFixed(1) : '—';
-                const siteLabel = escapeHtmlCell('Cluster ' + String(r.cluster ?? ''));
+                const siteLabelRaw = 'Cluster ' + String(r.cluster ?? '');
+                const siteLabel = escapeHtmlCell(siteLabelRaw);
+                const clusterKey = String(r.cluster || 'Unclassified');
+                const isOn = appState.visibleClusters[clusterKey] !== false;
                 tableHTML += `<tr class="${i%2===0?'bg-white':'bg-gray-50'} hover:bg-blue-50 transition-colors">
-                    <td class="p-3 font-bold" style="color:${r.color}; border-left: 4px solid ${r.color};">${siteLabel}</td>
+                    <td class="p-3 font-bold flex items-center gap-2" style="color:${r.color}; border-left: 4px solid ${r.color};">
+                        <input type="checkbox" class="h-3 w-3" ${isOn ? 'checked' : ''} onclick="toggleClusterVisibility('${clusterKey}')">
+                        <span>${siteLabel}</span>
+                    </td>
                     <td class="p-3 text-right font-semibold">${(r.vendorCount||0).toLocaleString()}</td>
                     <td class="p-3 text-right font-semibold text-[var(--maersk-primary-blue)]">${Math.round(r.totalADV||0).toLocaleString()}</td>
                     <td class="p-3 text-right">
@@ -2227,7 +2281,35 @@
 
         function toggleClusterVisibility(cluster) {
             appState.visibleClusters[cluster] = !appState.visibleClusters[cluster];
+            updateClusterFilters(appState.vendorTableData || []);
             renderMapboxMap();
+        }
+
+        function downloadManualFacilityBandsCSV() {
+            const bands = appState.manualFacilityBands;
+            if (!bands || !bands.rows || !bands.rows.length) {
+                alert('Run the analysis first so we can compute distance bands for the manual facility.');
+                return;
+            }
+            const rows = [
+                ['Facility', bands.facilityName],
+                ['Total volume', Math.round(bands.totalVol).toString()],
+                [],
+                ['Distance band', 'Total volume', '% of total']
+            ];
+            bands.rows.forEach(r => {
+                rows.push([r.label, Math.round(r.volume).toString(), r.pct.toFixed(1) + '%']);
+            });
+            const csv = rows.map(r => r.join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'manual_facility_distance_bands.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
 
@@ -2235,8 +2317,16 @@
         function getVendorRowsForCurrentScope() {
             const raw = appState.vendorTableData || [];
             const st = document.getElementById('stateFilterSingle')?.value || '';
-            if (!st || st === '__ALL__') return raw;
-            return raw.filter(d => d.state === st);
+            const sellerSel = document.getElementById('sellerTypeFilter')?.value || '';
+
+            let rows = raw;
+            if (st && st !== '__ALL__') {
+                rows = rows.filter(d => d.state === st);
+            }
+            if (sellerSel && sellerSel !== '__ALL__') {
+                rows = rows.filter(d => (d.sellerType || 'Unknown') === sellerSel);
+            }
+            return rows;
         }
 
         function populateStateFilter() {
@@ -2269,6 +2359,32 @@
             else sel.value = '__ALL__';
         }
 
+        function populateSellerTypeFilter() {
+            const sel = document.getElementById('sellerTypeFilter');
+            if (!sel) return;
+            const prev = sel.value;
+            const rows = getVendorRowsForCurrentScope();
+            const stypes = [...new Set(rows.map(d => String(d.sellerType || 'Unknown').trim()).filter(Boolean))].sort();
+
+            if (!rows.length || !stypes.length) {
+                sel.innerHTML = '<option value="">All seller types</option>';
+                sel.value = '';
+                return;
+            }
+
+            const totalCnt = rows.length;
+            const baseOpt = `<option value="">All seller types — ${totalCnt.toLocaleString()} vendors</option>`;
+            const opts = stypes.map(s => {
+                const cnt = rows.filter(d => (d.sellerType || 'Unknown') === s).length;
+                const safe = s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+                return `<option value="${safe}">${safe} — ${cnt.toLocaleString()} vendors</option>`;
+            }).join('');
+
+            sel.innerHTML = baseOpt + opts;
+            if (prev && stypes.includes(prev)) sel.value = prev;
+            else sel.value = '';
+        }
+
         function onStateFilterChange() {
             const hint = document.getElementById('stateScopeHint');
             const st = document.getElementById('stateFilterSingle')?.value || '';
@@ -2283,8 +2399,19 @@
                     hint.classList.add('hidden');
                 }
             }
+            populateSellerTypeFilter();
             showClusterPreview();
             showDataPreview();
+            updateUIState();
+        }
+
+        function onSellerTypeFilterChange() {
+            showClusterPreview();
+            showDataPreview();
+            // Only redraw map if an analysis has been run and map data exists
+            if (appState.mapData) {
+                renderMapboxMap();
+            }
             updateUIState();
         }
 
@@ -2901,15 +3028,34 @@
         function updateFacilityToggleControls(results) {
             if (!D.facilityToggleControls || !results) return;
 
+            // Ensure visibility state for auto-generated COGs
             results.forEach(facility => {
                 if (!(facility.id in appState.visibleFacilities)) {
                     appState.visibleFacilities[facility.id] = true;
                 }
+                if (!(facility.id in appState.visibleCircles)) {
+                    appState.visibleCircles[facility.id] = true;
+                }
             });
+
+            // Ensure visibility state for manual facilities (entered in the Scenario card)
+            (appState.facilities || []).forEach(facility => {
+                if (!(facility.id in appState.visibleFacilities)) {
+                    appState.visibleFacilities[facility.id] = true;
+                }
+                if (!(facility.id in appState.visibleCircles)) {
+                    appState.visibleCircles[facility.id] = true;
+                }
+            });
+
+            if (appState.visibleDistanceLabels['all'] === undefined) {
+                appState.visibleDistanceLabels['all'] = true;
+            }
 
             const overall = results.filter(f => f.isOverallCOG);
             const hubs = results.filter(f => f.isNetworkHubCOG);
             const clusters = results.filter(f => f.isClusterCOG && !f.isNetworkHubCOG);
+            const manual = (appState.facilities || []);
 
             const row = (facility) => `
                 <div class="facility-circle-control">
@@ -2921,6 +3067,15 @@
                         <input type="checkbox" id="fac-toggle-${facility.id}"
                                  onchange="toggleFacilityVisibility('${facility.id}')"
                                  ${appState.visibleFacilities[facility.id] ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="flex items-center justify-between text-xs text-[var(--text-subtle)] pl-8 pt-1 pb-1">
+                    Show service circles
+                    <label class="toggle-switch w-12 h-6">
+                        <input type="checkbox" id="circles-toggle-${facility.id}"
+                               onchange="toggleCircles('${facility.id}')"
+                               ${appState.visibleCircles[facility.id] ? 'checked' : ''}>
                         <span class="toggle-slider"></span>
                     </label>
                 </div>`;
@@ -2951,12 +3106,39 @@
             html += `<div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-subtle)] mt-2 mb-1">Cluster COGs (CSV)</div>`;
             html += clusters.map(row).join('');
 
+            if (manual.length) {
+                html += `<div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-subtle)] mt-3 mb-1">Manual facilities</div>`;
+                html += manual.map(row).join('');
+            }
+
+            // Global distance-label toggle (for midpoint labels and leg-end markers)
+            html += `
+                <div class="flex items-center justify-between text-xs text-[var(--text-subtle)] mt-3 pl-1 border-t border-[var(--border-light)] pt-2">
+                    <span>Show distance labels on routes</span>
+                    <label class="toggle-switch w-12 h-6 shrink-0">
+                        <input type="checkbox" id="distance-labels-toggle" onchange="toggleDistanceLabels()"
+                            ${appState.visibleDistanceLabels['all'] ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>`;
+
             D.facilityToggleControls.innerHTML = html;
         }
 
         // NEW: Function to toggle facility visibility
         function toggleFacilityVisibility(id) {
             appState.visibleFacilities[id] = !appState.visibleFacilities[id];
+            renderMapboxMap();
+        }
+
+        function toggleCircles(id) {
+            appState.visibleCircles[id] = !appState.visibleCircles[id];
+            renderMapboxMap();
+        }
+
+        function toggleDistanceLabels() {
+            const toggle = document.getElementById('distance-labels-toggle');
+            appState.visibleDistanceLabels['all'] = !!(toggle && toggle.checked);
             renderMapboxMap();
         }
 
@@ -3142,6 +3324,7 @@
             createDetailedTable(results);
             createServiceLevelSummaryTable(results);
             createVendorDetailTable(appState.vendorTableData, results, appState.selectedStates);
+            computeManualFacilityBands(wd);
         }
 
         function renderTEMUKPIs(clusterResults, workingData) {
@@ -3211,6 +3394,102 @@
                         <div class="text-xs text-[var(--text-subtle)] mt-1">Avg across recommended sites</div>
                     </div>
                 </div>`;
+        }
+
+        // ── Manual facility distance bands (default Ontario, CA site) ─────────
+        function computeManualFacilityBands(workingData) {
+            const fac = (appState.facilities || [])[0];
+            if (!fac || fac.lat == null || fac.lng == null) {
+                appState.manualFacilityBands = null;
+                const tbl = document.getElementById('manualFacilityBandsTable');
+                if (tbl) tbl.innerHTML = '<tbody><tr><td class="p-3 text-sm">No manual facility configured.</td></tr></tbody>';
+                return;
+            }
+            const rows = workingData || [];
+            if (!rows.length) {
+                appState.manualFacilityBands = null;
+                return;
+            }
+
+            const sellerSel = document.getElementById('sellerTypeFilter')?.value || '';
+            let bins;
+            if (sellerSel === 'Micro') {
+                // Finer bands for Micro analysis
+                bins = [
+                    { label: '0-5 mi', min: 0, max: 5 },
+                    { label: '5-10 mi', min: 5, max: 10 },
+                    { label: '10-15 mi', min: 10, max: 15 },
+                    { label: '>15 mi', min: 15, max: Infinity }
+                ];
+            } else {
+                // Default coarser bands
+                bins = [
+                    { label: '0-15 mi', min: 0, max: 15 },
+                    { label: '15-30 mi', min: 15, max: 30 },
+                    { label: '30-45 mi', min: 30, max: 45 },
+                    { label: '45-60 mi', min: 45, max: 60 },
+                    { label: '60-80 mi', min: 60, max: 80 },
+                    { label: '80-100 mi', min: 80, max: 100 },
+                    { label: '>100 mi', min: 100, max: Infinity }
+                ];
+            }
+
+            const totals = bins.map(() => 0);
+            let totalVol = 0;
+            rows.forEach(r => {
+                if (r.lat == null || r.lng == null) return;
+                const vol = Number(r.adv ?? r.TOTAL_WEIGHT ?? 0) || 0;
+                if (vol <= 0) return;
+                const d = haversine(r.lat, r.lng, fac.lat, fac.lng);
+                const idx = bins.findIndex(b => d >= b.min && d < b.max);
+                if (idx === -1) return;
+                totals[idx] += vol;
+                totalVol += vol;
+            });
+
+            const rowsOut = [];
+            let cumulative = 0;
+            bins.forEach((b, i) => {
+                const v = totals[i];
+                cumulative += v;
+                const pct = totalVol > 0 ? (v / totalVol) * 100 : 0;
+                const cumPct = totalVol > 0 ? (cumulative / totalVol) * 100 : 0;
+                rowsOut.push({
+                    label: b.label,
+                    volume: v,
+                    pct,
+                    cumulativeWeight: cumulative,
+                    cumulativePct: cumPct
+                });
+            });
+
+            appState.manualFacilityBands = {
+                facilityName: fac.name || 'Manual facility',
+                totalVol,
+                rows: rowsOut,
+                binnedData: rowsOut.map(r => ({
+                    label: r.label,
+                    incrementalWeight: r.volume,
+                    incrementalPct: r.pct,
+                    cumulativeWeight: r.cumulativeWeight,
+                    cumulativePct: r.cumulativePct
+                }))
+            };
+
+            const tbl = document.getElementById('manualFacilityBandsTable');
+            if (tbl) {
+                const heading = `Distance from ${appState.manualFacilityBands.facilityName}`;
+                let html = `<thead><tr class="bg-[var(--maersk-primary-blue)] text-white"><th class="p-3 text-left">${heading}</th><th class="p-3 text-right">Total volume</th><th class="p-3 text-right">% of volume</th></tr></thead><tbody>`;
+                rowsOut.forEach((r, idx) => {
+                    html += `<tr class="${idx%2===0?'bg-white':'bg-gray-50'}">
+                        <td class="p-3">${r.label}</td>
+                        <td class="p-3 text-right">${Math.round(r.volume).toLocaleString()}</td>
+                        <td class="p-3 text-right">${r.pct.toFixed(1)}%</td>
+                    </tr>`;
+                });
+                html += '</tbody>';
+                tbl.innerHTML = html;
+            }
         }
 
 
@@ -3409,52 +3688,54 @@
                 showlegend: false
             });
 
-            if (isDriving) {
-                traces.push({
+            if (appState.visibleDistanceLabels['all']) {
+                if (isDriving) {
+                    traces.push({
+                        type: 'scattermapbox',
+                        lat: [lat[0], lat[lat.length - 1]],
+                        lon: [lon[0], lon[lon.length - 1]],
+                        mode: 'markers+text',
+                        text: ['\u2191 1', '\u2191 2'],
+                        textfont: { size: 11, color: '#0f172a', family: 'Lexend' },
+                        textposition: ['top left', 'bottom right'],
+                        marker: {
+                            size: 9,
+                            color: lineColor,
+                            opacity: 0.95,
+                            line: { width: 1.5, color: '#ffffff' }
+                        },
+                        hoverinfo: 'skip',
+                        showlegend: false
+                    });
+                }
+
+                const mid = Math.floor(lat.length / 2);
+                const midLat = lat[mid];
+                const midLon = lon[mid];
+                const labelText = durStr
+                    ? `${labelMi.toFixed(1)} mi - ${durStr}`
+                    : isDriving
+                        ? `${labelMi.toFixed(1)} mi`
+                        : `${labelMi.toFixed(1)} mi (straight)`;
+
+                // Single label on the polyline midpoint: text-only (no marker = no white bubble).
+                labelTracesOut.push({
                     type: 'scattermapbox',
-                    lat: [lat[0], lat[lat.length - 1]],
-                    lon: [lon[0], lon[lon.length - 1]],
-                    mode: 'markers+text',
-                    text: ['\u2191 1', '\u2191 2'],
-                    textfont: { size: 11, color: '#0f172a', family: 'Lexend' },
-                    textposition: ['top left', 'bottom right'],
-                    marker: {
-                        size: 9,
-                        color: lineColor,
-                        opacity: 0.95,
-                        line: { width: 1.5, color: '#ffffff' }
+                    lat: [midLat],
+                    lon: [midLon],
+                    mode: 'text',
+                    text: [labelText],
+                    textfont: {
+                        size: 16,
+                        color: '#020617',
+                        family: 'Lexend, system-ui, sans-serif'
                     },
-                    hoverinfo: 'skip',
+                    textposition: 'middle center',
+                    hovertemplate: hover,
+                    hoverinfo: 'text',
                     showlegend: false
                 });
             }
-
-            const mid = Math.floor(lat.length / 2);
-            const midLat = lat[mid];
-            const midLon = lon[mid];
-            const labelText = durStr
-                ? `${labelMi.toFixed(1)} mi - ${durStr}`
-                : isDriving
-                    ? `${labelMi.toFixed(1)} mi`
-                    : `${labelMi.toFixed(1)} mi (straight)`;
-
-            // Single label on the polyline midpoint: text-only (no marker = no white bubble).
-            labelTracesOut.push({
-                type: 'scattermapbox',
-                lat: [midLat],
-                lon: [midLon],
-                mode: 'text',
-                text: [labelText],
-                textfont: {
-                    size: 16,
-                    color: '#020617',
-                    family: 'Lexend, system-ui, sans-serif'
-                },
-                textposition: 'middle center',
-                hovertemplate: hover,
-                hoverinfo: 'text',
-                showlegend: false
-            });
         }
 
         /**
@@ -3786,6 +4067,89 @@
                 }
 
                 appendCogMarkerTraces(traces, results, mapVolLabel);
+
+                // Add concentric service circles (iso-distance bands) around visible COGs
+                const radiusRings = [15, 30, 45, 60, 80, 100, 150]; // miles
+                const ringOpacities = [0.15, 0.12, 0.10, 0.08, 0.06, 0.04, 0.03];
+                const circleTargets = [
+                    // Auto-generated COGs (network / hubs / clusters)
+                    ...results.filter(f => mapLayerShowsFacility(f)),
+                    // Manual facilities entered by the user (map-only comparison)
+                    ...(appState.facilities || [])
+                ];
+
+                circleTargets
+                    .filter(f => appState.visibleFacilities[f.id] && appState.visibleCircles[f.id])
+                    .forEach(fac => {
+                        radiusRings.forEach((radiusMiles, index) => {
+                            const centerLat = fac.lat;
+                            const centerLon = fac.lng;
+
+                            const generateCirclePoints = (lat, lon, radius) => {
+                                const points = [];
+                                const R_earth_miles = 3958.8;
+                                for (let i = 0; i <= 360; i += 5) {
+                                    const bearing = i * Math.PI / 180;
+                                    const latRad = lat * Math.PI / 180;
+                                    const lonRad = lon * Math.PI / 180;
+                                    const newLatRad = Math.asin(Math.sin(latRad) * Math.cos(radius / R_earth_miles) +
+                                        Math.cos(latRad) * Math.sin(radius / R_earth_miles) * Math.cos(bearing));
+                                    const newLonRad = lonRad + Math.atan2(Math.sin(bearing) * Math.sin(radius / R_earth_miles) * Math.cos(latRad),
+                                        Math.cos(radius / R_earth_miles) - Math.sin(latRad) * Math.sin(newLatRad));
+                                    points.push({
+                                        lat: newLatRad * 180 / Math.PI,
+                                        lon: newLonRad * 180 / Math.PI
+                                    });
+                                }
+                                return points;
+                            };
+
+                            const circlePoints = generateCirclePoints(centerLat, centerLon, radiusMiles);
+
+                            traces.push({
+                                type: 'scattermapbox',
+                                lat: circlePoints.map(p => p.lat),
+                                lon: circlePoints.map(p => p.lon),
+                                mode: 'lines',
+                                fill: 'toself',
+                                fillcolor: `rgba(${hexToRgb(fac.color || COLORS.maerskAccentBlue)}, ${ringOpacities[index]})`,
+                                line: {
+                                    color: fac.color || COLORS.maerskAccentBlue,
+                                    width: 1,
+                                    dash: index === 0 ? 'solid' : 'dot'
+                                },
+                                name: `${fac.name} ${radiusMiles}mi`,
+                                hoverinfo: 'name',
+                                showlegend: false
+                            });
+                        });
+                    });
+
+                // Manual facility markers (simple dots + labels) for visual comparison
+                (appState.facilities || []).forEach((fac) => {
+                    if (!fac || fac.lat == null || fac.lng == null) return;
+                    if (!appState.visibleFacilities[fac.id]) return;
+                    const color = fac.color || COLORS.maerskPrimaryBlue;
+                    traces.push({
+                        type: 'scattermapbox',
+                        lat: [fac.lat],
+                        lon: [fac.lng],
+                        mode: 'markers+text',
+                        name: fac.name || 'Manual facility',
+                        marker: {
+                            size: 18,
+                            color,
+                            opacity: 0.95,
+                            line: { width: 2, color: '#ffffff' }
+                        },
+                        text: [fac.name || 'Manual facility'],
+                        textfont: { size: 11, color: '#0f172a', family: 'Lexend' },
+                        textposition: 'top center',
+                        hovertemplate: `<b>${fac.name || 'Manual facility'}</b><br>Lat: ${fac.lat?.toFixed?.(3) ?? fac.lat}<br>Lon: ${fac.lng?.toFixed?.(3) ?? fac.lng}<extra></extra>`,
+                        showlegend: false
+                    });
+                });
+
                 traces.push(...routeMidLabelTraces);
 
                 const layout = {
@@ -4035,6 +4399,16 @@
 
             // Filter for user-defined facilities and COG
             const facilitiesToCompare = results.filter(f => f.id !== 'cog' || f.name.includes('COG')).filter(Boolean);
+
+            // Include manual facility bands as a virtual facility if available (except in Micro mode, where bands differ)
+            const sellerSel = document.getElementById('sellerTypeFilter')?.value || '';
+            if (sellerSel !== 'Micro' && appState.manualFacilityBands && appState.manualFacilityBands.binnedData) {
+                facilitiesToCompare.push({
+                    id: 'manual_facility',
+                    name: appState.manualFacilityBands.facilityName + ' (manual)',
+                    binnedData: appState.manualFacilityBands.binnedData
+                });
+            }
 
             if (facilitiesToCompare.length < 1) {
                 tableContainer.innerHTML = '<thead><tr><th class="p-4">Service Level Summary</th></tr></thead><tbody><tr><td>Add facilities to the configuration to see this comparison.</td></tr></tbody>';
