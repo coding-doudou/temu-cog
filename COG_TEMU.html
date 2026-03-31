@@ -2408,8 +2408,9 @@
         function onSellerTypeFilterChange() {
             showClusterPreview();
             showDataPreview();
-            // Only redraw map if an analysis has been run and map data exists
+            // Recompute manual facility bands and map only if an analysis has been run
             if (appState.mapData) {
+                computeManualFacilityBands();
                 renderMapboxMap();
             }
             updateUIState();
@@ -3405,7 +3406,8 @@
                 if (tbl) tbl.innerHTML = '<tbody><tr><td class="p-3 text-sm">No manual facility configured.</td></tr></tbody>';
                 return;
             }
-            const rows = workingData || [];
+            // Always base bands on the current state + seller-type scope
+            const rows = getVendorRowsForCurrentScope();
             if (!rows.length) {
                 appState.manualFacilityBands = null;
                 return;
